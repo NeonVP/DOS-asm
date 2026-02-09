@@ -1,4 +1,6 @@
 testik.asm
 
-*.LST
+*.lst
 *.obj
+*.map
+*.com
