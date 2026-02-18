@@ -11,7 +11,7 @@ Start:
     mov si, offset msg
     
 print_loop:
-    mov al, [si]
+    mov al, [si]    
     cmp al, 0
     je done
 
