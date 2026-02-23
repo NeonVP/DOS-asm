@@ -12,7 +12,7 @@ Start:
     int 21h
 
 ; --- DATA ---
-bg_color    dw 001Fh            
+bg_color    dw 001Fh
 msg_color   dw 000Fh            
 def_msg     db 'The cat ate your output, MEOW!', 0
 msg_ptr     dw offset def_msg   
@@ -22,14 +22,30 @@ msg_len     dw 29
 main proc 
     push [bg_color]
     call clear_screen
-    add sp, 2
 
     ; X = 40 - (len / 2)
     mov ax, [msg_len]
-    shr ax, 1                   ; AX = len / 2
+    shr ax, 1
     mov cx, 40
-    sub cx, ax                  ; CX = 40 - (len / 2)
+    sub cx, ax
     
+    ; --- Frame parameters ---
+    mov bx, cx
+    sub bx, 2                   ; Frame X = Text X - 2 (отступ влево)
+    
+    mov dx, [msg_len]
+    add dx, 4                   ; Frame Width = len + 4 (отступы с обеих сторон)
+    
+    ; draw_frame(x, y, w, h, attr)
+    push [msg_color]
+    push 5
+    push dx
+    push 10                     ; Frame Y
+    push bx                     ; Frame X
+    call draw_frame
+    add sp, 10
+
+    ; --- Message output ---
     ; Y = 12
     push 12                     
     push cx                     
@@ -50,7 +66,8 @@ main endp
 ; ----------------------------------------------------------
 ; void parse_cmd()
 ; ----------------------------------------------------------
-; * Description: Parses the commnand line: background color (1), text color (2), message (3)
+; * Description: Parses the commnand line: background color (1), 
+;                text + frame color (2), message (3)
 ; * Arguments:   None 
 ; * Preserves:   None 
 ; * Destroys:    AX, BX, CX, SI, DI, FLAGS
@@ -60,35 +77,24 @@ parse_cmd proc
     cld
 
     ; cmd_len < 5 => few params => exit_parse
-    mov cl, [80h]
+    mov cl, ds:[80h]
     cmp cl, 5                   
     jb @@exit_parse
 
     ; the start ptr of the command line
     mov si, 81h
-@@skip_space:
-    lodsb
-    cmp al, ' '
-    je @@skip_space
-    dec si          ; return the position that is not ' '          
+
+    call @@skip_space       
 
     call @@hex_pair_to_byte
     mov byte ptr [bg_color], al         ; cmd_param (1) -> bg_color
 
-@@skip_space2:
-    lodsb
-    cmp al, ' '
-    je @@skip_space2
-    dec si
+    call @@skip_space
 
     call @@hex_pair_to_byte
     mov byte ptr [msg_color], al        ; cmd_param (2) -> msg_color
 
-@@skip_space3:
-    lodsb
-    cmp al, ' '
-    je @@skip_space3
-    dec si                      
+    call @@skip_space                  
 
     mov [msg_ptr], si
     
@@ -103,6 +109,13 @@ parse_cmd proc
     pop cx bx ax di si
     ret
 
+
+@@skip_space:
+    lodsb
+    cmp al, ' '
+    je @@skip_space
+    dec si          ; return the position that is not ' ' 
+    ret  
 
 @@hex_pair_to_byte:
     lodsb
@@ -120,32 +133,131 @@ parse_cmd proc
     and al, 11011111b           ; capitalize the letter
     sub al, 'A' - 10
     ret
+
 @@is_digit:
     sub al, '0'
     ret
+
 parse_cmd endp
 
+
 ; ----------------------------------------------------------
-; void clear_screen(word color_attr)
+; void clear_screen(word color_attr) --- PASCAL
 ; ----------------------------------------------------------
 ; * Description: Clears the text screen.
-; * Arguments: color_attr
+; * Arguments: color_attr -- [bp+4]
 ; * Preserves: DI, SI, BP, ES
 ; * Destroys: AX, CX
 ; ----------------------------------------------------------
-clear_screen proc C, color_attr:word
+clear_screen proc
+    push bp
+    mov  bp, sp
+    
     push es di cx
+
     mov ax, 0B800h
     mov es, ax
     xor di, di
     mov cx, 2000        
-    mov al, ' '         
-    mov ah, [byte ptr color_attr] 
+    
+    mov al, ' '
+    mov ah, [byte ptr bp + 4] 
+    
     cld
     rep stosw
+    
     pop cx di es
-    ret
+    pop bp
+    
+    ret 2
 clear_screen endp
+
+
+; ----------------------------------------------------------
+; void draw_frame(word x, word y, word w, word h, word attr)
+; ----------------------------------------------------------
+; * Description: Draws a frame with a filled background inside.
+; * Arguments:   x, y - coordinates of the top-left corner
+;                w, h - total width and height
+;                attr - color attribute
+; * Preserves:   AX, BX, CX, DX, SI, DI, ES
+; * Destroys:    FLAGS
+; ----------------------------------------------------------
+draw_frame proc C, x_pos:word, y_pos:word, w:word, h:word, attr:word
+    push ax bx cx dx si di es
+
+    mov ax, 0B800h
+    mov es, ax
+
+    ; Offset of the upper-left corner = (Y * 80 + X) * 2
+    mov ax, y_pos
+    mov bx, 80
+    mul bx
+    add ax, x_pos
+    shl ax, 1
+    mov di, ax          
+
+    mov ax, attr
+    mov ah, al          ; AH = color_attr, AL = symbol
+
+    ; --- The upper line ---
+    mov al, 0DAh        ; '┌'
+    stosw
+    mov cx, w
+    sub cx, 2
+@@top_line:
+    mov al, 0C4h        ; '─'
+    stosw
+    loop @@top_line
+    mov al, 0BFh        ; '┐'
+    stosw
+
+    ; --- The middle of the frame ---
+    mov dx, h
+    sub dx, 2           ; DX = number_of_inner_strings
+@@mid_rows:
+    mov bx, 80
+    sub bx, w
+    shl bx, 1
+    add di, bx
+
+    mov al, 0B3h        ; '│' (the left border)
+    stosw
+    
+    ; Fill the inner space with spaces
+    mov al, ' '
+    mov cx, w
+    sub cx, 2
+@@mid_space:
+    stosw
+    loop @@mid_space
+
+    mov al, 0B3h        ; '│' (the right corner)
+    stosw
+
+    dec dx
+    jnz @@mid_rows
+
+    ; --- The bottom line ---
+    mov bx, 80
+    sub bx, w
+    shl bx, 1
+    add di, bx
+
+    mov al, 0C0h        ; '└'
+    stosw
+    mov cx, w
+    sub cx, 2
+@@bot_line:
+    mov al, 0C4h        ; '─'
+    stosw
+    loop @@bot_line
+    mov al, 0D9h        ; '┘'
+    stosw
+
+    pop es di si dx cx bx ax
+    ret
+draw_frame endp
 
 
 ; ----------------------------------------------------------
@@ -188,7 +300,6 @@ print_string proc C, p_str:word, clr:word, x_pos:word, y_pos:word
     pop bp si di es
     ret
 print_string endp
-
 
 
 end Start
