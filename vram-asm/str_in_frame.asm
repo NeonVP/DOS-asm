@@ -18,6 +18,9 @@ def_msg     db 'The cat ate your output, MEOW!', 0
 msg_ptr     dw offset def_msg   
 msg_len     dw 29
 
+;              ┌ (DA), │ (B3), └ (C0), ─ (C4), ┘ (D9), │ (B3), ┐ (BF)
+frame_chars db 0DAh,   0B3h,   0C0h,   0C4h,   0D9h,   0B3h,   0BFh
+
 
 main proc 
     push [bg_color]
@@ -85,17 +88,14 @@ parse_cmd proc
     mov si, 81h
 
     call @@skip_space       
-
     call @@hex_pair_to_byte
     mov byte ptr [bg_color], al         ; cmd_param (1) -> bg_color
 
     call @@skip_space
-
     call @@hex_pair_to_byte
     mov byte ptr [msg_color], al        ; cmd_param (2) -> msg_color
 
     call @@skip_space                  
-
     mov [msg_ptr], si
     
     ; msg_len = 81h + cmd_len - cur_SI
@@ -201,15 +201,15 @@ draw_frame proc C, x_pos:word, y_pos:word, w:word, h:word, attr:word
     mov ah, al          ; AH = color_attr, AL = symbol
 
     ; --- The upper line ---
-    mov al, 0DAh        ; '┌'
+    mov al, [frame_chars + 0]        ; '┌'
     stosw
     mov cx, w
     sub cx, 2
 @@top_line:
-    mov al, 0C4h        ; '─'
+    mov al, [frame_chars + 3]        ; '─'
     stosw
     loop @@top_line
-    mov al, 0BFh        ; '┐'
+    mov al, [frame_chars + 6]        ; '┐'
     stosw
 
     ; --- The middle of the frame ---
@@ -221,7 +221,7 @@ draw_frame proc C, x_pos:word, y_pos:word, w:word, h:word, attr:word
     shl bx, 1
     add di, bx
 
-    mov al, 0B3h        ; '│' (the left border)
+    mov al, [frame_chars + 1]        ; '│' (the left border)
     stosw
     
     ; Fill the inner space with spaces
@@ -232,7 +232,7 @@ draw_frame proc C, x_pos:word, y_pos:word, w:word, h:word, attr:word
     stosw
     loop @@mid_space
 
-    mov al, 0B3h        ; '│' (the right corner)
+    mov al, [frame_chars + 5]        ; '│' (the right corner)
     stosw
 
     dec dx
@@ -244,15 +244,15 @@ draw_frame proc C, x_pos:word, y_pos:word, w:word, h:word, attr:word
     shl bx, 1
     add di, bx
 
-    mov al, 0C0h        ; '└'
+    mov al, [frame_chars + 2]        ; '└'
     stosw
     mov cx, w
     sub cx, 2
 @@bot_line:
-    mov al, 0C4h        ; '─'
+    mov al, [frame_chars + 3]        ; '─'
     stosw
     loop @@bot_line
-    mov al, 0D9h        ; '┘'
+    mov al, [frame_chars + 4]        ; '┘'
     stosw
 
     pop es di si dx cx bx ax
