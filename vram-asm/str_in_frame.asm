@@ -83,7 +83,7 @@ parse_cmd proc
 
     ; cmd_len < 8 => few params => exit_parse
     mov cl, ds:[80h]
-    cmp cl, 8                   
+    cmp cl, 10                
     jb @@exit_parse
 
     ; the start ptr of the command line
@@ -101,8 +101,17 @@ parse_cmd proc
     lodsb
     mov byte ptr [fill_char], al        ; cmd_param (3) -> fill_char
 
+    call @@skip_space
+    lodsb
+    cmp al, '1'
+    jne @@no_custom_frame
 
+    call @@skip_space
+    mov di, offset frame_chars
+    mov cx, 7
+    rep movsb                           ; cmd_param (5) -> frame elements
 
+@@no_custom_frame:
     call @@skip_space                  
     mov [msg_ptr], si
     
