@@ -13,7 +13,8 @@ Start:
 
 ; --- DATA ---
 bg_color    dw 001Fh
-msg_color   dw 000Fh            
+msg_color   dw 000Fh
+fill_char   dw 0020h  
 def_msg     db 'The cat ate your output, MEOW!', 0
 msg_ptr     dw offset def_msg   
 msg_len     dw 29
@@ -40,13 +41,14 @@ main proc
     add dx, 4                   ; Frame Width = len + 4 (отступы с обеих сторон)
     
     ; draw_frame(x, y, w, h, attr)
+    push [fill_char]
     push [msg_color]
     push 5
     push dx
     push 10                     ; Frame Y
     push bx                     ; Frame X
     call draw_frame
-    add sp, 10
+    add sp, 12
 
     ; --- Message output ---
     ; Y = 12
@@ -79,9 +81,9 @@ parse_cmd proc
     push si di ax bx cx
     cld
 
-    ; cmd_len < 5 => few params => exit_parse
+    ; cmd_len < 8 => few params => exit_parse
     mov cl, ds:[80h]
-    cmp cl, 5                   
+    cmp cl, 8                   
     jb @@exit_parse
 
     ; the start ptr of the command line
@@ -94,6 +96,12 @@ parse_cmd proc
     call @@skip_space
     call @@hex_pair_to_byte
     mov byte ptr [msg_color], al        ; cmd_param (2) -> msg_color
+
+    call @@skip_space
+    lodsb
+    mov byte ptr [fill_char], al        ; cmd_param (3) -> fill_char
+
+
 
     call @@skip_space                  
     mov [msg_ptr], si
@@ -174,16 +182,17 @@ clear_screen endp
 
 
 ; ----------------------------------------------------------
-; void draw_frame(word x, word y, word w, word h, word attr)
+; void draw_frame(word x, word y, word w, word h, word attr, word f_char)
 ; ----------------------------------------------------------
 ; * Description: Draws a frame with a filled background inside.
-; * Arguments:   x, y - coordinates of the top-left corner
-;                w, h - total width and height
-;                attr - color attribute
+; * Arguments:   x, y   - coordinates of the top-left corner
+;                w, h   - total width and height
+;                attr   - color attribute
+;                f_char - fill char
 ; * Preserves:   AX, BX, CX, DX, SI, DI, ES
 ; * Destroys:    FLAGS
 ; ----------------------------------------------------------
-draw_frame proc C, x_pos:word, y_pos:word, w:word, h:word, attr:word
+draw_frame proc C, x_pos:word, y_pos:word, w:word, h:word, attr:word, f_char:word
     push ax bx cx dx si di es
 
     mov ax, 0B800h
@@ -221,18 +230,18 @@ draw_frame proc C, x_pos:word, y_pos:word, w:word, h:word, attr:word
     shl bx, 1
     add di, bx
 
-    mov al, [frame_chars + 1]        ; '│' (the left border)
+    mov al, [frame_chars + 1]
     stosw
     
     ; Fill the inner space with spaces
-    mov al, ' '
+    mov al, byte ptr [f_char]
     mov cx, w
     sub cx, 2
 @@mid_space:
     stosw
     loop @@mid_space
 
-    mov al, [frame_chars + 5]        ; '│' (the right corner)
+    mov al, [frame_chars + 5]
     stosw
 
     dec dx
