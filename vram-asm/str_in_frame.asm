@@ -223,10 +223,8 @@ draw_frame proc C, x_pos:word, y_pos:word, w:word, h:word, attr:word, f_char:wor
     stosw
     mov cx, w
     sub cx, 2
-@@top_line:
     mov al, [frame_chars + 3]        ; '─'
-    stosw
-    loop @@top_line
+    rep stosw
     mov al, [frame_chars + 6]        ; '┐'
     stosw
 
