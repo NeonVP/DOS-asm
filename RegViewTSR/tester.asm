@@ -5,13 +5,19 @@ org 100h
 locals @@
 
 Start:
-    mov ax, 1111h
-    mov bx, 2222h
-    mov cx, 3333h
-    mov dx, 4444h
-    mov si, 5555h
-    mov di, 6666h
-    mov bp, 7777h
+    mov ax, 1984h
+    mov bx, 0BEEFh
+    mov cx, 0CAFEh
+    mov dx, 0DEADh
+    mov si, 0F00Dh
+    mov di, 0D00Dh
+    mov bp, 0FACEh
+    mov sp, 0F84h
+
+    mov ax, 0ABCDh
+    mov ds, ax
+    mov ax, 0BADAh
+    mov es, ax
 
 @@loop:
     cli

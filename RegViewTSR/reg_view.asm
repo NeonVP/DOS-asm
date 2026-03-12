@@ -8,6 +8,8 @@ FRAME_H       equ 6
 REGS_X        equ 23
 REGS_Y        equ 4
 REGS_STR_LEN  equ 121
+FRAME_X_END   equ (FRAME_X + FRAME_W)
+FRAME_Y_END   equ (FRAME_Y + FRAME_H)
 
 .code
 org 100h
@@ -61,8 +63,6 @@ main proc
 
     sti
     ret
-
-
 main endp
 
 
@@ -80,13 +80,11 @@ calc_segs proc
     mov bx, cs
 
     mov ax, offset draw_buffer
-    add ax, 15
     shr ax, 4               
     add ax, bx              
     mov cs:[draw_seg], ax      
 
     mov ax, offset save_buffer
-    add ax, 15
     shr ax, 4
     add ax, bx
     mov cs:[save_seg], ax
@@ -271,6 +269,8 @@ My_Int08_Handler proc
     jmp @@exit
 
 @@active:
+    call reconcile_buffers
+
     ; [bp+0]=BP, +2=ES, +4=DS, +6=DI, +8=SI, +10=DX, +12=CX, +14=BX, +16=AX
     ; [bp+18]=IP, [bp+20]=CS, [bp+22]=FLAGS
     mov ax, ss:[bp+16]                ; AX
@@ -330,6 +330,15 @@ My_Int08_Handler proc
     mov di, offset fl_hex
     call word_to_hex_at
 
+    push word ptr cs:[draw_seg]
+    push REGS_Y
+    push REGS_X
+    push word ptr cs:[msg_color]
+    push REGS_STR_LEN
+    push offset regs_render
+    call print_string
+    add sp, 12
+
     push VIDEO_SEG
     push REGS_Y
     push REGS_X
@@ -354,6 +363,10 @@ enable_frame proc
     call copy_screen
 
     push VIDEO_SEG
+    push word ptr cs:[draw_seg]
+    call copy_screen
+
+    push word ptr cs:[draw_seg]
     push word ptr cs:[fill_char]
     push word ptr cs:[bg_color]
     push FRAME_H
@@ -362,6 +375,19 @@ enable_frame proc
     push FRAME_X
     call draw_frame
     add sp, 14
+
+    push word ptr cs:[draw_seg]
+    push REGS_Y
+    push REGS_X
+    push word ptr cs:[msg_color]
+    push REGS_STR_LEN
+    push offset regs_render
+    call print_string
+    add sp, 12
+
+    push word ptr cs:[draw_seg]
+    push VIDEO_SEG
+    call copy_screen
 
     mov cs:[active_flag], 1
     ret
@@ -374,6 +400,76 @@ disable_frame proc
     mov cs:[active_flag], 0
     ret
 disable_frame endp
+
+
+; ----------------------------------------------------------
+; void reconcile_buffers()
+; ----------------------------------------------------------
+; * Description: Compares video with draw_buffer.
+;                Outside frame: draw/save follow video.
+;                Inside frame: save follows video, video is restored from draw.
+; * Arguments:   None
+; * Preserves:   None
+; * Destroys:    AX, BX, CX, DX, SI, DI, DS, ES, BP, FLAGS
+; ----------------------------------------------------------
+reconcile_buffers proc
+    push ax bx cx dx si di ds es bp
+
+    mov ax, VIDEO_SEG
+    mov ds, ax
+    mov ax, word ptr cs:[draw_seg]
+    mov es, ax
+    mov bx, word ptr cs:[save_seg]
+
+    xor di, di           ; byte offset
+    xor si, si           ; row
+    mov dx, 25
+
+@@row_loop:
+    mov cx, 80
+    xor bp, bp           ; col
+@@col_loop:
+    mov ax, ds:[di]
+    cmp ax, es:[di]
+    je @@next_cell
+
+    ; save_buffer <- video
+    push es
+    mov es, bx
+    mov es:[di], ax
+    pop es
+
+    ; inside frame?
+    cmp si, FRAME_Y
+    jb @@outside
+    cmp si, FRAME_Y_END
+    jae @@outside
+    cmp bp, FRAME_X
+    jb @@outside
+    cmp bp, FRAME_X_END
+    jae @@outside
+
+    ; inside frame: restore video from draw
+    mov ax, es:[di]
+    mov ds:[di], ax
+    jmp @@next_cell
+
+@@outside:
+    ; outside frame: draw_buffer <- video
+    mov es:[di], ax
+
+@@next_cell:
+    add di, 2
+    inc bp
+    loop @@col_loop
+
+    inc si
+    dec dx
+    jnz @@row_loop
+
+    pop bp es ds di si dx cx bx ax
+    ret
+reconcile_buffers endp
 
 
 ; ----------------------------------------------------------
@@ -612,7 +708,9 @@ Old_Int9_Off dw 0
 Old_Int9_Seg dw 0
 
 ; --- BUFFERS ---
+align 16
 draw_buffer db 4000 dup(0)
+align 16
 save_buffer db 4000 dup(0)
 
 draw_seg dw 0
