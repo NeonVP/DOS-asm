@@ -1,13 +1,13 @@
 .model tiny, C
 
 VIDEO_SEG     equ 0B800h
-FRAME_X       equ 60
-FRAME_Y       equ 0
-FRAME_W       equ 20
+FRAME_X       equ 22
+FRAME_Y       equ 3
+FRAME_W       equ 36
 FRAME_H       equ 6
-REGS_X        equ 61
-REGS_Y        equ 1
-REGS_STR_LEN  equ 31
+REGS_X        equ 23
+REGS_Y        equ 4
+REGS_STR_LEN  equ 121
 
 .code
 org 100h
@@ -52,7 +52,6 @@ main proc
 
     pop ds
 
-    ; Init keyboard tail pointer to avoid firing on old buffered keys.
     push ds
     mov ax, 40h
     mov ds, ax
@@ -81,7 +80,7 @@ calc_segs proc
     mov bx, cs
 
     mov ax, offset draw_buffer
-    add ax, 15          ; Округляем вверх для корректного shr
+    add ax, 15
     shr ax, 4               
     add ax, bx              
     mov cs:[draw_seg], ax      
@@ -100,7 +99,7 @@ calc_segs endp
 ; void parse_cmd()
 ; ----------------------------------------------------------
 ; * Description: Parses command tail:
-;                [BG] [TXT] [Fill] [Flag] [7Chars if Flag=1] [Message]
+;                [ATTR] [Fill] [Flag] [7Chars if Flag=1]
 ; * Arguments:   None
 ; * Preserves:   None
 ; * Destroys:    AX, BX, CX, SI, DI, FLAGS
@@ -110,7 +109,7 @@ parse_cmd proc
     cld
 
     mov cl, ds:[80h]
-    cmp cl, 6                
+    cmp cl, 4
     jb @@exit_parse
 
     mov si, 81h
@@ -118,9 +117,6 @@ parse_cmd proc
     call @@skip_space
     call @@hex_pair_to_byte
     mov byte ptr [bg_color], al
-
-    call @@skip_space
-    call @@hex_pair_to_byte
     mov byte ptr [msg_color], al
 
     call @@skip_space
@@ -173,6 +169,15 @@ parse_cmd proc
 parse_cmd endp
 
 
+; ----------------------------------------------------------
+; void My_Int09_Handler()
+; ----------------------------------------------------------
+; * Description: Keyboard ISR. Detects Ctrl+S/Ctrl+E,
+;                sets pending_action, and removes the hotkey from the queue.
+; * Arguments:   None
+; * Preserves:   None (all regs restored before IRET)
+; * Destroys:    AX, BX, CX, DX, SI, DI, DS, ES, BP, FLAGS
+; ----------------------------------------------------------
 My_Int09_Handler proc 
     push ax bx cx dx si di ds es bp
     pushf
@@ -222,50 +227,57 @@ My_Int09_Handler proc
 My_Int09_Handler endp
 
 
+; ----------------------------------------------------------
+; void My_Int08_Handler()
+; ----------------------------------------------------------
+; * Description: Timer ISR. Chains original handler, handles pending_action,
+;                and updates register snapshot inside the frame when active.
+; * Arguments:   None
+; * Preserves:   None (all regs restored before IRET)
+; * Destroys:    AX, BX, CX, DX, SI, DI, DS, ES, BP, FLAGS
+; ----------------------------------------------------------
 My_Int08_Handler proc
     push ax bx cx dx si di ds es bp
-    mov bp, sp                        ; Теперь через SS:[BP+...] видим весь стек
+    mov bp, sp
 
-    ; Вызов старого обработчика (стандарт BIOS)
     push bp
     pushf
     call dword ptr cs:Old_Int8
     pop bp
 
     push cs
-    pop ds                            ; DS = CS для работы со своими данными
+    pop ds
 
     ; --- ЛОГИКА ПЕРЕКЛЮЧЕНИЯ (pending_action) ---
     mov al, cs:[pending_action]
     cmp al, 0
-    je @@check_active                 ; Если действий не забронировано, проверяем обновление
+    je @@check_active
 
     cmp al, 1
-    je @@do_enable
+    je short @@do_enable
     
-    ; Иначе это disable (2)
     call disable_frame
     mov cs:[pending_action], 0
-    jmp @@exit
+    jmp near ptr @@exit
 
 @@do_enable:
     call enable_frame
     mov cs:[pending_action], 0
-    jmp @@exit
+    jmp near ptr @@exit
 
 @@check_active:
     cmp cs:[active_flag], 1
-    jne @@exit                        ; Если рамка не активна, ничего не рисуем
+    je @@active
+    jmp @@exit
 
-    ; --- ОБНОВЛЕНИЕ ЗНАЧЕНИЙ РЕГИСТРОВ ---
-    ; Берем значения из стека (сохранены в начале обработчика)
-    ; Смещение +16 — это AX, +14 — BX и так далее (зависит от порядка push)
-    
-    mov ax, ss:[bp+16]                ; AX из стека
+@@active:
+    ; [bp+0]=BP, +2=ES, +4=DS, +6=DI, +8=SI, +10=DX, +12=CX, +14=BX, +16=AX
+    ; [bp+18]=IP, [bp+20]=CS, [bp+22]=FLAGS
+    mov ax, ss:[bp+16]                ; AX
     mov di, offset ax_hex
     call word_to_hex_at
 
-    mov ax, ss:[bp+14]                ; BX из стека
+    mov ax, ss:[bp+14]                ; BX
     mov di, offset bx_hex
     call word_to_hex_at
 
@@ -277,10 +289,50 @@ My_Int08_Handler proc
     mov di, offset dx_hex
     call word_to_hex_at
 
-    ; Отрисовка обновленной строки прямо в видеопамять (B800h)
+    mov ax, ss:[bp+8]                 ; SI
+    mov di, offset si_hex
+    call word_to_hex_at
+
+    mov ax, ss:[bp+6]                 ; DI
+    mov di, offset di_hex
+    call word_to_hex_at
+
+    mov ax, ss:[bp+0]                 ; BP
+    mov di, offset bp_hex
+    call word_to_hex_at
+
+    mov ax, bp                        ; SP 
+    add ax, 24
+    mov di, offset sp_hex
+    call word_to_hex_at
+
+    mov ax, ss:[bp+4]                 ; DS
+    mov di, offset ds_hex
+    call word_to_hex_at
+
+    mov ax, ss:[bp+2]                 ; ES
+    mov di, offset es_hex
+    call word_to_hex_at
+
+    mov ax, ss                         ; SS
+    mov di, offset ss_hex
+    call word_to_hex_at
+
+    mov ax, ss:[bp+20]                ; CS
+    mov di, offset cs_hex
+    call word_to_hex_at
+
+    mov ax, ss:[bp+18]                ; IP
+    mov di, offset ip_hex
+    call word_to_hex_at
+
+    mov ax, ss:[bp+22]                ; FLAGS
+    mov di, offset fl_hex
+    call word_to_hex_at
+
     push VIDEO_SEG
-    push 1                            ; Y (внутри рамки)
-    push 61                           ; X (внутри рамки)
+    push REGS_Y
+    push REGS_X
     push word ptr cs:[msg_color]
     push REGS_STR_LEN
     push offset regs_render
@@ -294,19 +346,20 @@ My_Int08_Handler endp
 
 
 enable_frame proc
-    ; 1. Сохраняем текущий экран в save_buffer
+    mov ax, cs:[bg_color]
+    mov cs:[msg_color], ax
+
     push VIDEO_SEG
     push word ptr cs:[save_seg]
     call copy_screen
 
-    ; 2. Рисуем рамку в видеопамять
     push VIDEO_SEG
     push word ptr cs:[fill_char]
     push word ptr cs:[bg_color]
-    push 6                  ; Высота
-    push 20                 ; Ширина
-    push 0                  ; Y
-    push 60                 ; X
+    push FRAME_H
+    push FRAME_W
+    push FRAME_Y
+    push FRAME_X
     call draw_frame
     add sp, 14
 
@@ -315,15 +368,12 @@ enable_frame proc
 enable_frame endp
 
 disable_frame proc
-    ; Восстанавливаем экран из save_buffer
     push word ptr cs:[save_seg]
     push VIDEO_SEG
     call copy_screen
     mov cs:[active_flag], 0
     ret
 disable_frame endp
-
-
 
 
 ; ----------------------------------------------------------
@@ -491,28 +541,27 @@ print_string proc C, p_str:word, s_len:word, clr:word, x_pos:word, y_pos:word, t
     
     cld
 @@print_loop:
-    jcxz @@done         ; Безопасный выход, если CX=0
+    jcxz @@done
     lodsb
     dec cx
 
-    cmp al, 10          ; Проверка на перенос строки
+    cmp al, 10
     je @@new_line
     
     stosw               
     jmp @@print_loop
 
 @@new_line:
-    ; Логика переноса: спускаемся на 160 байт и возвращаемся к X
     add di, 160
     push ax dx
     mov ax, di
     mov bx, 160
     xor dx, dx
     div bx
-    sub di, dx          ; В начало строки
+    sub di, dx
     mov bx, [x_pos]
     shl bx, 1
-    add di, bx          ; Сдвиг на X
+    add di, bx
     pop dx ax
     jmp @@print_loop
 
@@ -524,13 +573,23 @@ print_string endp
 
 ; ================ DATA ================
 regs_render   db 'AX='
-ax_hex        db '0000', 10
-              db 'BX='
-bx_hex        db '0000', 10
-              db 'CX='
-cx_hex        db '0000', 10
-              db 'DX='
-dx_hex        db '0000'
+ax_hex        db '0000  BX='
+bx_hex        db '0000  CX='
+cx_hex        db '0000  DX='
+dx_hex        db '0000', 10
+              db 'SI='
+si_hex        db '0000  DI='
+di_hex        db '0000  BP='
+bp_hex        db '0000  SP='
+sp_hex        db '0000', 10
+              db 'DS='
+ds_hex        db '0000  ES='
+es_hex        db '0000  SS='
+ss_hex        db '0000  CS='
+cs_hex        db '0000', 10
+              db 'IP='
+ip_hex        db '0000  FL='
+fl_hex        db '0000'
 
 pending_action db 0                   ; 0-none, 1-enable, 2-disable
 
