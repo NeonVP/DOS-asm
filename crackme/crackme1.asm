@@ -11,10 +11,10 @@ Start:
     
     mov si, offset input_data
     call hash_string
-    mov bl, al
+    mov bl, al              
 
     mov si, offset secret_password
-    call hash_string
+    call decryption_and_hash 
     
     cmp al, bl
     je .access_allowed
@@ -62,9 +62,30 @@ hash_done:
     ret
 hash_string endp
 
+
+decryption_and_hash proc
+    xor al, al
+@@loop:
+    mov dl, [si]
+    cmp dl, '$'
+    je @@done
+    
+    ; --- Deciphering Caesar ---
+    sub dl, 3
+    
+    ; --- Hash ---
+    xor al, dl
+    add al, 05h
+    rol al, 2
+    inc si
+    jmp @@loop
+@@done:
+    ret
+decryption_and_hash endp
+
 ; --- ДАННЫЕ ---
 input_data      db 10 dup('?')
-secret_password db 'Meow_uwu$', 0 
+secret_password db 'Phrzbxzx$', 0 
 
 msg_ok          db 0Dh, 0Ah, 'Access Granted!$'
 msg_fail        db 0Dh, 0Ah, 'Access Denied!$'
